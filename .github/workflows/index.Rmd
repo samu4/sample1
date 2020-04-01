@@ -1,0 +1,333 @@
+---
+title: "Coronavirus (COVID-19)"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny 
+source_code: embed
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shinyWidgets) # ##selection of country
+library(countrycode)
+library(sp)
+library(DT)
+library(shiny)
+library(rvest)
+library(xml2)
+library(dplyr)
+library(plotly)
+library(leaflet)
+library(leafpop)
+library(purrr)
+library(tibble)
+library(rgdal)
+library(highcharter)
+
+#------------------ Parameters ------------------
+# Set colors
+# https://www.w3.org/TR/css-color-3/#svg-color
+confirmed_color <- "purple"
+active_color <- "#1f77b4"
+recovered_color <- "forestgreen"
+death_color <- "red"
+#set date for dashboard
+date <- Sys.Date() %>% format(., "%m/%d/%Y")
+#------------------ Data ------------------
+# extract records from worldometers
+# webpage_url <- "https://www.worldometers.info/coronavirus/"
+#  webpage <- xml2::read_html(webpage_url)
+#  ExOffndrsRaw <- rvest::html_table(webpage)[[1]] %>% 
+#    tibble::as_tibble(.name_repair = "unique") # repair the repeated columns
+#    cov_raw <- ExOffndrsRaw %>% 
+#    dplyr::glimpse(45)
+ #----------------------------datasave------------------------------------------------------------------------------
+cov_raw<-read.csv("C:/Users/SAMUEL/Downloads/cov_raw.csv", stringsAsFactors = F,header=T)
+
+cov_raw<-cov_raw[,-1]
+#---------------------------end of sample data----------------------------------------------------------------------
+# 
+ cov_raw <- cov_raw %>% 
+   dplyr::rename(Country.Region= "Country.Other")%>% 
+   dplyr::rename(Critical= "Serious.Critical")
+ 
+   #dplyr::mutate(country = if_else(Country.Region == "CAR", "Central African Republic", Country.Region))
+   #cov_raw<-read.csv("C:/Users/smutinda/Desktop/covid19/covid19/cov_raw.csv")
+#cov_raw<-cov_raw[,-1]
+
+cov_raw$Country.Other <-as.character(cov_raw$Country.Region)
+cov_raw$TotalCases<-as.numeric(gsub(",", "", cov_raw$TotalCases))
+cov_raw$NewCases<-as.numeric(gsub(",", "", cov_raw$NewCases))
+cov_raw$TotalDeaths<-as.numeric(gsub(",", "",cov_raw$TotalDeaths))
+cov_raw$NewDeaths <-as.numeric(gsub(",", "",  cov_raw$NewDeaths)) 
+cov_raw$TotalRecovered<-as.numeric(gsub(",", "",cov_raw$TotalRecovered))
+cov_raw$ActiveCases<-as.numeric(gsub(",", "",   cov_raw$ActiveCases ))  
+cov_raw$Critical<-as.numeric(gsub(",", "", cov_raw$Critical))
+#cov_raw$Tot.Cases.1M.pop<-as.numeric(gsub(",", "", cov_raw$Tot.Cases.1M.pop))
+
+cov_raw <- subset(cov_raw, Country.Other!="Total:")
+cov_raw <- subset(cov_raw, Country.Other!="Diamond Princess")
+
+d <- cov_raw %>% 
+  #dplyr::rename(Country.Region= "Country.Other") %>%
+  #dplyr::rename(Critical= "Critical") %>%
+  dplyr::mutate(country = if_else(Country.Region == "CAR", "Central African Republic",
+                 if_else(Country.Region == "Saint Martin", "St. Maarten",
+                            if_else(Country.Region == "St. Barth", "Saint Barthelemy",
+                               if_else(Country.Region == "Channel Islands", "Jersey", Country.Region)))))
+
+
+#d <- d %>% 
+#  dplyr::mutate(country = if_else(Country.Region == "Diamond Princess", "France", country))
+#names(d1)
+
+
+d1 <- d %>% 
+  dplyr::mutate(continent = countrycode(sourcevar = d[[11]],
+                                 origin = "country.name",
+                                 destination = "continent"))%>%
+  dplyr::mutate(country = trimws(country)) 
+
+d<-d1
+names(d)
+# dplyr::mutate(country = dplyr::if_else(Country.Region == "United Arab Emirates", "UAE", Country.Region)) %>%
+  # dplyr::mutate(country = dplyr::if_else(Country.Region == "Mainland China", "China", Country.Region)) %>%
+  # dplyr::mutate(country = dplyr::if_else(Country.Region == "North Macedonia", "N.Macedonia", Country.Region))
+
+
+```
+
+
+Summary
+=======================================================================
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+```{r, echo=FALSE}
+inputPanel(
+radioButtons("category",label= "Select continent",choices=c("All","Africa", "Americas",     "Asia",  "Europe" , "Oceania"),inline = F))
+
+
+zone.choices2 = reactive({
+  if(input$category=="All"){
+    d
+  }else{
+  d %>%
+  filter(continent==input$category)}
+})
+
+```
+
+```{r, echo=FALSE}
+MYdf<-reactive({
+d <- zone.choices2() %>% 
+  dplyr::filter(TotalCases > 0) %>% 
+  dplyr::arrange(-TotalCases) %>%
+  dplyr::mutate(country = trimws(country)) %>%
+  dplyr::mutate(country = factor(country, levels = country))
+
+})
+```
+
+
+
+```{r, echo=FALSE}
+
+#selectInput("dataset","Choose :",choices = d$country)
+
+
+renderUI({
+inputPanel(
+selectInput("Zone", label = "Country:",
+          choices = c("All", levels(MYdf()$country)), selected = "All"))})
+
+zone.choices = reactive({
+  if (input$Zone=="All"){
+  MYdf()
+    }else{
+  MYdf() %>%
+  filter(country==input$Zone)}
+})
+
+
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+### Total confirmed (as of ```r date```)
+
+```{r}
+
+renderValueBox({
+dd<-as.data.frame(zone.choices())
+valueBox(value = paste(format(sum(dd$TotalCases), big.mark = ","), "", sep = " "), 
+         #caption = "Total Confirmed", 
+         icon = "fas fa-user-md", 
+         color = confirmed_color)
+})
+```
+
+### Active cases (as of ```r date```)
+
+```{r}
+renderValueBox({
+dd<-as.data.frame(zone.choices())
+valueBox(value = paste(format(sum(dd$ActiveCases, na.rm = TRUE), big.mark = ","), 
+                       " (", round(100 * sum(dd$ActiveCases, na.rm = TRUE) / sum(dd$TotalCases), 1), 
+                       "%)", sep = ""),  icon = "fas fa-ambulance", 
+         color = active_color)
+})
+```
+
+### Total recovered (as of ```r date```)
+
+```{r}
+renderValueBox({
+dd<-as.data.frame(zone.choices())
+valueBox(value = paste(format(sum(dd$TotalRecovered, na.rm = TRUE), big.mark = ","), " (",
+                       round(100 * sum(dd$TotalRecovered, na.rm = TRUE) / sum(dd$TotalCases), 1), 
+                       "%)", sep = ""), 
+          icon = "fas fa-heartbeat", 
+         color = recovered_color)})
+
+```
+
+### Total Deaths (as of ```r date```)
+
+```{r}
+renderValueBox({
+dd<-as.data.frame(zone.choices())
+valueBox(value = paste(format(sum(dd$TotalDeaths, na.rm = TRUE), big.mark = ","), " (",
+                       round(100 * sum(dd$TotalDeaths, na.rm = TRUE) / sum(dd$TotalCases), 1), 
+                       "%)", sep = ""),
+          icon = "fas fa-heart-broken", 
+         color = "black")})
+```
+
+Row {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+### Cases Distribution by Type (as of ```r date```)
+
+
+```{r, echo=FALSE}
+titleP<-reactive({
+  if (input$Zone=="All"){
+    paste0("Confirmed cases for all the countries in ",input$category," by ",Sys.Date(),".")
+    }else{
+      paste0("Confirmed cases in ",input$Zone," by ",Sys.Date(),".")
+
+}
+})
+```
+
+
+```{r}
+MUDD41<-reactive({
+  if(input$category=="All"){
+  df<-d1[,c(12,4,6,7)]  
+  MUDD4<-as.data.frame(
+    df %>%
+      group_by(continent) %>% 
+      summarise_each(funs(sum(., na.rm = TRUE)))%>%
+      dplyr::rename(country= "continent"))
+    }else{
+  dd<-as.data.frame(zone.choices())
+  MUDD4<-dd[,c(11,4,6,7)]
+    }
+})
+```
+
+
+
+```{r df_summary}
+renderHighchart({
+categories_column <- names(MUDD41()[1])
+measure_columns <- names(MUDD41()[,-1])
+
+generated_chart <- highchart() %>%
+  hc_xAxis(categories = MUDD41()[, categories_column],
+           title = categories_column)
+
+invisible(lapply(measure_columns, function(column) {
+  generated_chart <<-
+    hc_add_series(hc = generated_chart, name = column,
+                  data = MUDD41()[, column])
+}))
+
+generated_chart <- generated_chart %>%
+  hc_chart(type = "column") %>%
+  hc_plotOptions(series = list(stacking = "normal",dataLabels = list(enabled = FALSE)))%>%
+  hc_yAxis(title = list(text = "Coffirmed cases"),stackLabels = list(color = "black", enabled = TRUE))%>% 
+  hc_exporting(enabled = TRUE)%>% 
+  hc_title(text=titleP(),align="center")%>% 
+  hc_tooltip(crosshairs = TRUE, backgroundColor = "#FCFFC5",
+             shared = TRUE, borderWidth = 2)
+  
+  
+})
+```
+
+Table
+=======================================================================
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+```{r, echo=FALSE}
+inputPanel(
+radioButtons("category1",label= "Select continent",choices=c("Africa", "Americas",     "Asia",  "Europe" , "Oceania")))
+
+zone.choices3 = reactive({
+    d1 %>%
+  filter(continent==input$category1)
+})
+
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Recovery and Death Rates by Country (as of ```r date```)
+
+```{r, echo=FALSE}
+DT::renderDataTable({
+
+d <- zone.choices3()[,1:8] %>%
+  dplyr::filter(TotalCases > 0) %>% 
+  #dplyr::mutate_at(c(2,3,4,5,6,7,8,9), as.numeric) %>%
+  dplyr::arrange(-TotalCases) 
+  
+})
+
+```
+
+
+About
+=======================================================================
+
+This [COVID-19 in Africa dashboard](https://ymutua.github.io/covid19-africa-dashboard/) provides an overview of the 2019 Novel Coronavirus COVID-19 (2019-nCoV) epidemic in Africa.
+
+**Data**
+
+The input data for this dashboard is from [Worldometers](https://www.worldometers.info). The data and dashboard is refreshed on a daily bases. 
+
+**Packages**
+
+* Dashboard interface - the [flexdashboard](https://rmarkdown.rstudio.com/flexdashboard/) package. 
+* Visualization - the [plotly](https://plot.ly/r/) package for the plots and [leaflet](https://rstudio.github.io/leaflet/) for the map
+* Data manipulation - [dplyr](https://dplyr.tidyverse.org/), and [tidyr](https://tidyr.tidyverse.org/)
+* Tables - the [DT](https://rstudio.github.io/DT/) package
+
+**Deployment and reproducibly**
+
+This dashboard has been deployed on Github Pages. If you wish to deploy and/or modify the dashboard on your Github account, you can apply the following steps:
+
+* Fork the dashboard [repository](https://github.com/ymutua/covid19-africa-dashboard), or
+* Clone it and push it to your Github package
+* Here some general guidance about deployment of flexdashboard on Github page - [link](https://github.com/pbatey/flexdashboard-example)
+
+For any question or feedback, you can either open an [issue](https://github.com/ymutua/covid19-africa-dashboard/issues) or contact me on [Twitter](https://twitter.com/JohnYumbya).
